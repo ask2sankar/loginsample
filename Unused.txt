@@ -1,0 +1,71 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Microsoft.Build.Locator;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.MSBuild;
+using NuGet.ProjectModel;
+
+namespace RemoveUnusedReferences
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            if (args.Length != 1)
+            {
+                Console.WriteLine("Usage: RemoveUnusedReferences <path-to-csproj>");
+                return;
+            }
+
+            string projectPath = args[0];
+
+            // Register MSBuild to use the correct tools version
+            MSBuildLocator.RegisterDefaults();
+
+            using (var workspace = MSBuildWorkspace.Create())
+            {
+                // Load the project
+                var project = workspace.OpenProjectAsync(projectPath).Result;
+
+                // Get all references
+                var references = project.MetadataReferences.ToList();
+
+                // Find unused references
+                var unusedReferences = FindUnusedReferences(project, references);
+
+                // Remove unused references from the project
+                foreach (var reference in unusedReferences)
+                {
+                    Console.WriteLine($"Removing unused reference: {reference.Display}");
+                    project = project.RemoveMetadataReference(reference);
+                }
+
+                // Save changes to the project file
+                File.WriteAllText(projectPath, project.ToXml());
+            }
+        }
+
+        static List<MetadataReference> FindUnusedReferences(Project project, List<MetadataReference> references)
+        {
+            var unusedReferences = new List<MetadataReference>();
+
+            foreach (var reference in references)
+            {
+                var compilation = project.GetCompilationAsync().Result;
+
+                // Check if the reference is used
+                var symbols = compilation.GetSymbolsWithName(name => true);
+                var isUsed = symbols.Any(symbol => symbol.ContainingAssembly?.Identity.Name == reference.Display);
+
+                if (!isUsed)
+                {
+                    unusedReferences.Add(reference);
+                }
+            }
+
+            return unusedReferences;
+        }
+    }
+} 
